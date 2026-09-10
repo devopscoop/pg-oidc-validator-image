@@ -1,0 +1,47 @@
+name: Build and push
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly rebuild: the image vendors libcurl, so its security fixes only
+    # reach clusters through a fresh build here and a deliberate dated-tag
+    # bump in the consuming gitops repo.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+env:
+  PG_MAJOR: "18"
+  DISTRO: trixie
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: date
+        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two tags per build: the moving <major>-<distro> tag, and a dated
+      # immutable one — gitops repos should pin the dated tag so extension
+      # upgrades (which restart the postgres pods) are deliberate git changes.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/pg-oidc-validator:${{ env.PG_MAJOR }}-${{ env.DISTRO }}
+            ghcr.io/${{ github.repository_owner }}/pg-oidc-validator:${{ env.PG_MAJOR }}-${{ env.DISTRO }}-${{ steps.date.outputs.date }}
